@@ -81,9 +81,13 @@ jobs:
             
             const issues = [];
             
-            // 简单的代码审查规则
+            console.log('开始代码审查...');
+            console.log('检查的文件:', files);
+            
             for (const file of files) {
               if (!file) continue;
+              
+              console.log(`\n检查文件: ${file}`);
               
               try {
                 const { data: content } = await github.rest.repos.getContent({
@@ -94,32 +98,41 @@ jobs:
                 });
                 
                 const code = Buffer.from(content.content, 'base64').toString();
+                console.log(`文件内容长度: ${code.length} 字符`);
                 
                 // 检查常见问题
                 if (code.includes('console.log') && file.endsWith('.js')) {
                   issues.push(`${file}: 包含 console.log 语句`);
+                  console.log('✓ 检测到 console.log');
                 }
                 if (code.includes('TODO') || code.includes('FIXME')) {
                   issues.push(`${file}: 包含未完成的 TODO/FIXME 注释`);
+                  console.log('✓ 检测到 TODO/FIXME');
                 }
                 
-                // 安全检查：硬编码的密钥和敏感信息
+                // 安全检查
                 if (code.match(/API_KEY\s*=\s*["'][^"']+["']/i)) {
                   issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 API_KEY`);
+                  console.log('✓ 检测到硬编码的 API_KEY');
                 }
                 if (code.match(/PASSWORD\s*=\s*["'][^"']+["']/i)) {
                   issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 PASSWORD`);
+                  console.log('✓ 检测到硬编码的 PASSWORD');
                 }
                 if (code.match(/SECRET\s*=\s*["'][^"']+["']/i)) {
                   issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 SECRET`);
+                  console.log('✓ 检测到硬编码的 SECRET');
                 }
                 if (code.match(/TOKEN\s*=\s*["'][^"']+["']/i)) {
                   issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 TOKEN`);
+                  console.log('✓ 检测到硬编码的 TOKEN');
                 }
                 if (code.match(/["'](sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36,})["']/)) {
                   issues.push(`${file}: ⚠️ 安全风险 - 检测到疑似真实密钥格式`);
+                  console.log('✓ 检测到疑似真实密钥格式');
                 }
                 
+                // 检查未使用的导入
                 if (code.match(/const\s+\w+\s*=\s*require\([^)]+\)/) && !code.includes('module.exports')) {
                   const unusedImports = code.match(/const\s+(\w+)\s*=/g);
                   if (unusedImports) {
@@ -129,6 +142,7 @@ jobs:
                       const matches = code.match(regex);
                       if (matches && matches.length === 1) {
                         issues.push(`${file}: 未使用的导入 '${varName}'`);
+                        console.log(`✓ 检测到未使用的导入: ${varName}`);
                       }
                     }
                   }
@@ -137,6 +151,9 @@ jobs:
                 console.log(`无法读取文件 ${file}: ${error.message}`);
               }
             }
+            
+            console.log(`\n总共发现 ${issues.length} 个问题`);
+            console.log('问题列表:', issues);
             
             core.setOutput('has-issues', issues.length > 0);
             core.setOutput('issues', issues.join('\n'));
