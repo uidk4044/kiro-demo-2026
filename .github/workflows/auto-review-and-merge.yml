@@ -1,0 +1,204 @@
+name: 自动代码审查和合并
+
+on:
+  push:
+    branches-ignore:
+      - main
+      - master
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  auto-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 创建或更新 Pull Request
+        id: create-pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = context.ref.replace('refs/heads/', '');
+            const repo = context.repo;
+            
+            // 检查是否已存在 PR
+            const { data: prs } = await github.rest.pulls.list({
+              owner: repo.owner,
+              repo: repo.repo,
+              head: `${repo.owner}:${branch}`,
+              state: 'open'
+            });
+            
+            let prNumber;
+            if (prs.length > 0) {
+              prNumber = prs[0].number;
+              console.log(`使用现有 PR #${prNumber}`);
+            } else {
+              // 创建新 PR
+              const { data: pr } = await github.rest.pulls.create({
+                owner: repo.owner,
+                repo: repo.repo,
+                title: `自动 PR: ${branch}`,
+                head: branch,
+                base: 'main',
+                body: '🤖 此 PR 由自动化工作流创建，正在进行代码审查...'
+              });
+              prNumber = pr.number;
+              console.log(`创建新 PR #${prNumber}`);
+            }
+            
+            core.setOutput('pr-number', prNumber);
+            return prNumber;
+
+      - name: 获取变更的文件
+        id: changed-files
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ steps.create-pr.outputs.pr-number }};
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            
+            return files.map(f => f.filename).join('\n');
+
+      - name: 代码审查
+        id: code-review
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ steps.create-pr.outputs.pr-number }};
+            const files = `${{ steps.changed-files.outputs.result }}`.split('\n');
+            
+            const issues = [];
+            
+            // 简单的代码审查规则
+            for (const file of files) {
+              if (!file) continue;
+              
+              try {
+                const { data: content } = await github.rest.repos.getContent({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  path: file,
+                  ref: context.sha
+                });
+                
+                const code = Buffer.from(content.content, 'base64').toString();
+                
+                // 检查常见问题
+                if (code.includes('console.log') && file.endsWith('.js')) {
+                  issues.push(`${file}: 包含 console.log 语句`);
+                }
+                if (code.includes('TODO') || code.includes('FIXME')) {
+                  issues.push(`${file}: 包含未完成的 TODO/FIXME 注释`);
+                }
+                
+                // 安全检查：硬编码的密钥和敏感信息
+                if (code.match(/API_KEY\s*=\s*["'][^"']+["']/i)) {
+                  issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 API_KEY`);
+                }
+                if (code.match(/PASSWORD\s*=\s*["'][^"']+["']/i)) {
+                  issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 PASSWORD`);
+                }
+                if (code.match(/SECRET\s*=\s*["'][^"']+["']/i)) {
+                  issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 SECRET`);
+                }
+                if (code.match(/TOKEN\s*=\s*["'][^"']+["']/i)) {
+                  issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 TOKEN`);
+                }
+                if (code.match(/["'](sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36,})["']/)) {
+                  issues.push(`${file}: ⚠️ 安全风险 - 检测到疑似真实密钥格式`);
+                }
+                
+                if (code.match(/const\s+\w+\s*=\s*require\([^)]+\)/) && !code.includes('module.exports')) {
+                  const unusedImports = code.match(/const\s+(\w+)\s*=/g);
+                  if (unusedImports) {
+                    for (const imp of unusedImports) {
+                      const varName = imp.match(/const\s+(\w+)/)[1];
+                      const regex = new RegExp(`\\b${varName}\\b`, 'g');
+                      const matches = code.match(regex);
+                      if (matches && matches.length === 1) {
+                        issues.push(`${file}: 未使用的导入 '${varName}'`);
+                      }
+                    }
+                  }
+                }
+              } catch (error) {
+                console.log(`无法读取文件 ${file}: ${error.message}`);
+              }
+            }
+            
+            core.setOutput('has-issues', issues.length > 0);
+            core.setOutput('issues', issues.join('\n'));
+            return issues;
+
+      - name: 如果有问题，创建 Issue
+        if: steps.code-review.outputs.has-issues == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ steps.create-pr.outputs.pr-number }};
+            const issues = `${{ steps.code-review.outputs.issues }}`;
+            
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `代码审查发现问题 - PR #${prNumber}`,
+              body: `## 🔍 代码审查结果\n\n在 PR #${prNumber} 中发现以下问题：\n\n${issues.split('\n').map(i => `- ${i}`).join('\n')}\n\n请修复这些问题后重新提交。\n\n关联 PR: #${prNumber}`,
+              labels: ['code-review', 'automated']
+            });
+            
+            // 在 PR 中添加评论
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: `⚠️ 代码审查发现问题，已创建 Issue #${issue.number}\n\n请查看并修复问题。`
+            });
+
+      - name: 如果没有问题，自动合并并删除分支
+        if: steps.code-review.outputs.has-issues == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ steps.create-pr.outputs.pr-number }};
+            const branch = context.ref.replace('refs/heads/', '');
+            
+            // 添加审查通过的评论
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: '✅ 代码审查通过，自动合并中...'
+            });
+            
+            // 合并 PR
+            await github.rest.pulls.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              merge_method: 'squash',
+              commit_title: `自动合并: ${branch}`,
+              commit_message: '代码审查通过，自动合并'
+            });
+            
+            // 删除分支
+            try {
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/${branch}`
+              });
+              console.log(`已删除分支 ${branch}`);
+            } catch (error) {
+  
