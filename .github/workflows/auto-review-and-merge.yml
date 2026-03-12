@@ -201,4 +201,5 @@ jobs:
               });
               console.log(`已删除分支 ${branch}`);
             } catch (error) {
-  
+              console.log(`删除分支失败: ${error.message}`);
+            }
