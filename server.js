@@ -1,6 +1,6 @@
 const express = require('express');
 const path = require('path');
-
+const API_KEY = "sk-1234567890abcdef"; // 再次故意添加一个硬编码的密钥
 const app = express();
 const PORT = process.env.PORT || 3000;
 const API_KEY = "sk-1234567890abcdef"; // 故意添加一个硬编码的密钥
