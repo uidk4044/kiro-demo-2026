@@ -126,23 +126,33 @@ jobs:
               issues.forEach(i => console.log(`  - ${i}`));
             }
             
-            core.setOutput('has-issues', issues.length > 0 ? 'true' : 'false');
-            core.setOutput('issues', issues.join('\n'));
             return issues;
 
+      - name: 检查是否有问题
+        id: check-issues
+        run: |
+          ISSUE_COUNT=$(echo '${{ steps.code-review.outputs.result }}' | jq 'length')
+          echo "count=$ISSUE_COUNT" >> $GITHUB_OUTPUT
+          if [ "$ISSUE_COUNT" -gt 0 ]; then
+            echo "has-issues=true" >> $GITHUB_OUTPUT
+          else
+            echo "has-issues=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: 如果有问题，创建 Issue
-        if: steps.code-review.outputs.has-issues == 'true'
+        if: steps.check-issues.outputs.has-issues == 'true'
         uses: actions/github-script@v7
         with:
           script: |
             const prNumber = ${{ github.event.pull_request.number }};
-            const issues = `${{ steps.code-review.outputs.issues }}`;
+            const issuesArray = ${{ steps.code-review.outputs.result }};
+            const issues = issuesArray.join('\n');
             
             const { data: issue } = await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `代码审查发现问题 - PR #${prNumber}`,
-              body: `## 🔍 代码审查结果\n\n在 PR #${prNumber} 中发现以下问题：\n\n${issues.split('\n').map(i => `- ${i}`).join('\n')}\n\n请修复这些问题后重新提交。\n\n关联 PR: #${prNumber}`,
+              body: `## 🔍 代码审查结果\n\n在 PR #${prNumber} 中发现以下问题：\n\n${issuesArray.map(i => `- ${i}`).join('\n')}\n\n请修复这些问题后重新提交。\n\n关联 PR: #${prNumber}`,
               labels: ['code-review', 'automated']
             });
             
@@ -154,7 +164,7 @@ jobs:
             });
 
       - name: 如果没有问题，自动合并并删除分支
-        if: steps.code-review.outputs.has-issues == 'false'
+        if: steps.check-issues.outputs.has-issues == 'false'
         uses: actions/github-script@v7
         with:
           script: |
