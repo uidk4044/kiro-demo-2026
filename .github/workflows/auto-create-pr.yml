@@ -1,0 +1,86 @@
+name: 自动创建 Pull Request
+
+on:
+  push:
+    branches:
+      - '**'
+      - '!main'
+      - '!master'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  create-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查是否已存在 PR
+        id: check-pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = context.ref.replace('refs/heads/', '');
+            console.log(`当前分支: ${branch}`);
+            
+            // 查找是否已存在该分支的 PR
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${branch}`,
+              state: 'open'
+            });
+            
+            if (prs.length > 0) {
+              console.log(`已存在 PR #${prs[0].number}，跳过创建`);
+              return { exists: true, number: prs[0].number };
+            }
+            
+            console.log('未找到现有 PR，将创建新的');
+            return { exists: false };
+
+      - name: 创建 Pull Request
+        if: fromJSON(steps.check-pr.outputs.result).exists == false
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = context.ref.replace('refs/heads/', '');
+            const defaultBranch = context.payload.repository.default_branch;
+            
+            // 获取最新的 commit 信息
+            const { data: commit } = await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha
+            });
+            
+            const commitMessage = commit.commit.message;
+            const commitAuthor = commit.commit.author.name;
+            
+            // 生成 PR 标题和描述
+            const title = `🔄 ${branch}`;
+            const body = `## 自动创建的 Pull Request
+            
+**分支:** \`${branch}\`
+**最新提交:** ${commitMessage}
+**提交者:** ${commitAuthor}
+
+---
+
+此 PR 由 GitHub Actions 自动创建。
+代码审查将自动进行，如果通过审查将自动合并。`;
+            
+            // 创建 PR
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              head: branch,
+              base: defaultBranch
+            });
+            
+            console.log(`✅ 已创建 PR #${pr.number}`);
+            console.log(`URL: ${pr.html_url}`);
+            
+            return { number: pr.number, url: pr.html_url };
