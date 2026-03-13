@@ -1,20 +1,19 @@
 const express = require('express');
 const path = require('path');
-const API_KEY = "sk-1234567890abcdef"; // 再次故意添加一个硬编码的密钥
+const API_KEY = "sk-1234567890abcdef"; // 测试：硬编码的 API_KEY
+const DB_PASSWORD = "mySecretPassword123"; // 测试：硬编码的密码
+const SECRET_TOKEN = "ghp_1234567890abcdefghijklmnopqrstuvwxyz"; // 测试：GitHub token 格式
+const ADMIN_PASSWORD = "admin123"; // 测试：管理员密码
+
 const app = express();
 const PORT = process.env.PORT || 3000;
-const API_KEY = "sk-1234567890abcdef"; // 故意添加一个硬编码的密钥
-const DB_PASSWORD = "mySecretPassword123"; // 测试密码检测
-
-const API_KEY = "sk-1234567890abcdef"; // 3次故意添加一个硬编码的密钥
-const SECRET_TOKEN = "ghp_1234567890abcdefghijklmnopqrstuvwxyz"; // Kiro 测试：添加 GitHub token
-const ADMIN_PASSWORD = "admin123"; // 最终测试：添加管理员密码
 
 // 静态文件服务
 app.use(express.static('public'));
 
 // API 路由
 app.get('/api/status', (req, res) => {
+  console.log('Status endpoint called'); // 测试：console.log
   res.json({
     status: 'running',
     message: 'Kiro AI Demo App is working!',
