@@ -18,27 +18,7 @@ jobs:
       - name: Checkout 代码
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-
-      - name: 获取 PR 信息
-        id: pr-info
-        run: |
-          echo "pr-number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
-          echo "branch=${{ github.event.pull_request.head.ref }}" >> $GITHUB_OUTPUT
-
-      - name: 获取变更的文件
-        id: changed-files
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const prNumber = ${{ github.event.pull_request.number }};
-            const { data: files } = await github.rest.pulls.listFiles({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber
-            });
-            
-            return files.map(f => f.filename).join('\n');
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: 代码审查
         id: code-review
@@ -47,129 +27,94 @@ jobs:
           script: |
             const prNumber = ${{ github.event.pull_request.number }};
             const headSha = '${{ github.event.pull_request.head.sha }}';
-            const files = `${{ steps.changed-files.outputs.result }}`.split('\n');
+            
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
             
             const issues = [];
             
-            console.log(`检查 PR #${prNumber}, HEAD SHA: ${headSha}`);
-            console.log(`文件列表: ${files.join(', ')}`);
+            console.log(`=== 开始检查 PR #${prNumber} ===`);
+            console.log(`HEAD SHA: ${headSha}`);
+            console.log(`文件数量: ${files.length}`);
             
             for (const file of files) {
-              if (!file) continue;
+              console.log(`\n检查文件: ${file.filename}`);
               
               try {
                 const { data: content } = await github.rest.repos.getContent({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  path: file,
+                  path: file.filename,
                   ref: headSha
                 });
                 
                 const code = Buffer.from(content.content, 'base64').toString();
-                console.log(`\n检查文件: ${file}, 大小: ${code.length} 字节`);
+                console.log(`文件大小: ${code.length} 字节`);
+                console.log(`前100字符: ${code.substring(0, 100)}`);
                 
-                // 检查常见问题
-                if (code.includes('console.log') && file.endsWith('.js')) {
-                  issues.push(`${file}: 包含 console.log 语句`);
-                  console.log(`✓ 检测到 console.log`);
-                }
-                if (code.includes('TODO') || code.includes('FIXME')) {
-                  issues.push(`${file}: 包含未完成的 TODO/FIXME 注释`);
-                  console.log(`✓ 检测到 TODO/FIXME`);
-                }
+                // 安全检查
+                const checks = [
+                  { pattern: /(const|let|var)\s+\w*API_KEY\w*\s*=\s*["'][^"']+["']/i, msg: '硬编码的 API_KEY' },
+                  { pattern: /(const|let|var)\s+\w*PASSWORD\w*\s*=\s*["'][^"']+["']/i, msg: '硬编码的 PASSWORD' },
+                  { pattern: /(const|let|var)\s+\w*SECRET\w*\s*=\s*["'][^"']+["']/i, msg: '硬编码的 SECRET' },
+                  { pattern: /(const|let|var)\s+\w*TOKEN\w*\s*=\s*["'][^"']+["']/i, msg: '硬编码的 TOKEN' },
+                  { pattern: /console\.log/i, msg: 'console.log 语句' }
+                ];
                 
-                // 安全检查 - 修复正则表达式以匹配 const/let/var 声明
-                if (code.match(/(const|let|var)?\s*API_KEY\s*=\s*["'][^"']+["']/i)) {
-                  issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 API_KEY`);
-                  console.log(`✓ 检测到 API_KEY`);
-                }
-                if (code.match(/(const|let|var)?\s*\w*PASSWORD\w*\s*=\s*["'][^"']+["']/i)) {
-                  issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 PASSWORD`);
-                  console.log(`✓ 检测到 PASSWORD`);
-                }
-                if (code.match(/(const|let|var)?\s*\w*SECRET\w*\s*=\s*["'][^"']+["']/i)) {
-                  issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 SECRET`);
-                  console.log(`✓ 检测到 SECRET`);
-                }
-                if (code.match(/(const|let|var)?\s*\w*TOKEN\w*\s*=\s*["'][^"']+["']/i)) {
-                  issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 TOKEN`);
-                  console.log(`✓ 检测到 TOKEN`);
-                }
-                if (code.match(/["'](sk-[a-zA-Z0-9]{10,}|ghp_[a-zA-Z0-9]{20,})["']/)) {
-                  issues.push(`${file}: ⚠️ 安全风险 - 检测到疑似真实密钥格式`);
-                  console.log(`✓ 检测到密钥格式`);
-                }
-                
-                // 检查未使用的导入
-                if (code.match(/const\s+\w+\s*=\s*require\([^)]+\)/) && !code.includes('module.exports')) {
-                  const unusedImports = code.match(/const\s+(\w+)\s*=/g);
-                  if (unusedImports) {
-                    for (const imp of unusedImports) {
-                      const varName = imp.match(/const\s+(\w+)/)[1];
-                      const regex = new RegExp(`\\b${varName}\\b`, 'g');
-                      const matches = code.match(regex);
-                      if (matches && matches.length === 1) {
-                        issues.push(`${file}: 未使用的导入 '${varName}'`);
-                        console.log(`✓ 检测到未使用的导入: ${varName}`);
-                      }
-                    }
+                for (const check of checks) {
+                  if (code.match(check.pattern)) {
+                    const issue = `${file.filename}: ⚠️ ${check.msg}`;
+                    issues.push(issue);
+                    console.log(`✓ 检测到: ${check.msg}`);
                   }
                 }
               } catch (error) {
-                console.log(`无法读取文件 ${file}: ${error.message}`);
+                console.log(`读取失败: ${error.message}`);
               }
             }
             
-            console.log(`\n总共发现 ${issues.length} 个问题`);
+            console.log(`\n=== 检查完成 ===`);
+            console.log(`发现问题数量: ${issues.length}`);
+            
             if (issues.length > 0) {
               console.log('问题列表:');
               issues.forEach(i => console.log(`  - ${i}`));
+              
+              // 创建 Issue
+              const { data: issue } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `⚠️ 代码审查发现问题 - PR #${prNumber}`,
+                body: `## 🔍 代码审查结果\n\n在 PR #${prNumber} 中发现以下问题：\n\n${issues.map(i => `- ${i}`).join('\n')}\n\n请修复这些问题后重新提交。`,
+                labels: ['code-review', 'automated']
+              });
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: `⚠️ 代码审查发现 ${issues.length} 个问题，已创建 Issue #${issue.number}\n\n请查看并修复问题后再合并。`
+              });
+              
+              console.log(`已创建 Issue #${issue.number}`);
+              
+              // 重要：抛出错误阻止后续步骤
+              throw new Error(`发现 ${issues.length} 个代码问题，阻止自动合并`);
             }
             
-            return issues;
+            console.log('✅ 未发现问题，可以继续');
+            return { hasIssues: false };
 
-      - name: 检查是否有问题
-        id: check-issues
-        run: |
-          ISSUE_COUNT=$(echo '${{ steps.code-review.outputs.result }}' | jq 'length')
-          echo "count=$ISSUE_COUNT" >> $GITHUB_OUTPUT
-          if [ "$ISSUE_COUNT" -gt 0 ]; then
-            echo "has-issues=true" >> $GITHUB_OUTPUT
-          else
-            echo "has-issues=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: 如果有问题，创建 Issue
-        if: steps.check-issues.outputs.has-issues == 'true'
+      - name: 自动合并
+        if: success()
         uses: actions/github-script@v7
         with:
           script: |
             const prNumber = ${{ github.event.pull_request.number }};
-            const issuesArray = ${{ steps.code-review.outputs.result }};
-            const issues = issuesArray.join('\n');
-            
-            const { data: issue } = await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `代码审查发现问题 - PR #${prNumber}`,
-              body: `## 🔍 代码审查结果\n\n在 PR #${prNumber} 中发现以下问题：\n\n${issuesArray.map(i => `- ${i}`).join('\n')}\n\n请修复这些问题后重新提交。\n\n关联 PR: #${prNumber}`,
-              labels: ['code-review', 'automated']
-            });
-            
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              body: `⚠️ 代码审查发现问题，已创建 Issue #${issue.number}\n\n请查看并修复问题。`
-            });
-
-      - name: 如果没有问题，自动合并并删除分支
-        if: steps.check-issues.outputs.has-issues == 'false'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const prNumber = ${{ github.event.pull_request.number }};
-            const branch = '${{ steps.pr-info.outputs.branch }}';
+            const branch = '${{ github.event.pull_request.head.ref }}';
             
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -182,9 +127,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: prNumber,
-              merge_method: 'squash',
-              commit_title: `自动合并: ${branch}`,
-              commit_message: '代码审查通过，自动合并'
+              merge_method: 'squash'
             });
             
             try {
@@ -193,7 +136,6 @@ jobs:
                 repo: context.repo.repo,
                 ref: `heads/${branch}`
               });
-              console.log(`已删除分支 ${branch}`);
             } catch (error) {
               console.log(`删除分支失败: ${error.message}`);
             }
