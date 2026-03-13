@@ -6,7 +6,7 @@ const PORT = process.env.PORT || 3000;
 const API_KEY = "sk-1234567890abcdef"; // 故意添加一个硬编码的密钥
 const DB_PASSWORD = "mySecretPassword123"; // 测试密码检测
 
-
+const API_KEY = "sk-1234567890abcdef"; // 3次故意添加一个硬编码的密钥
 
 // 静态文件服务
 app.use(express.static('public'));
