@@ -78,24 +78,24 @@ jobs:
                   console.log(`✓ 检测到 TODO/FIXME`);
                 }
                 
-                // 安全检查
-                if (code.match(/API_KEY\s*=\s*["'][^"']+["']/i)) {
+                // 安全检查 - 修复正则表达式以匹配 const/let/var 声明
+                if (code.match(/(const|let|var)?\s*API_KEY\s*=\s*["'][^"']+["']/i)) {
                   issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 API_KEY`);
                   console.log(`✓ 检测到 API_KEY`);
                 }
-                if (code.match(/PASSWORD\s*=\s*["'][^"']+["']/i)) {
+                if (code.match(/(const|let|var)?\s*\w*PASSWORD\w*\s*=\s*["'][^"']+["']/i)) {
                   issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 PASSWORD`);
                   console.log(`✓ 检测到 PASSWORD`);
                 }
-                if (code.match(/SECRET\s*=\s*["'][^"']+["']/i)) {
+                if (code.match(/(const|let|var)?\s*\w*SECRET\w*\s*=\s*["'][^"']+["']/i)) {
                   issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 SECRET`);
                   console.log(`✓ 检测到 SECRET`);
                 }
-                if (code.match(/TOKEN\s*=\s*["'][^"']+["']/i)) {
+                if (code.match(/(const|let|var)?\s*\w*TOKEN\w*\s*=\s*["'][^"']+["']/i)) {
                   issues.push(`${file}: ⚠️ 安全风险 - 检测到硬编码的 TOKEN`);
                   console.log(`✓ 检测到 TOKEN`);
                 }
-                if (code.match(/["'](sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36,})["']/)) {
+                if (code.match(/["'](sk-[a-zA-Z0-9]{10,}|ghp_[a-zA-Z0-9]{20,})["']/)) {
                   issues.push(`${file}: ⚠️ 安全风险 - 检测到疑似真实密钥格式`);
                   console.log(`✓ 检测到密钥格式`);
                 }
