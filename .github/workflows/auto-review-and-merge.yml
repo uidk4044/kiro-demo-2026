@@ -21,13 +21,32 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
 
       - name: 安装 cppcheck
-        run: sudo apt-get install -y cppcheck
+        run: sudo apt-get install -y cppcheck python3 python3-pip
 
-      - name: cppcheck 静态分析
-        id: cppcheck
+      - name: 安装 MISRA 插件
         run: |
-          cppcheck --enable=warning,style,performance,portability --suppress=missingIncludeSystem --error-exitcode=1 --output-file=cppcheck-result.txt $(find . -name "*.c" -o -name "*.cpp" -o -name "*.h" | grep -v node_modules) 2>&1 || true
-          cat cppcheck-result.txt
+          wget -q https://raw.githubusercontent.com/danmar/cppcheck/main/addons/misra.py -O /usr/local/bin/misra.py
+          wget -q https://raw.githubusercontent.com/danmar/cppcheck/main/addons/cppcheckdata.py -O /usr/local/bin/cppcheckdata.py
+
+      - name: cppcheck + MISRA C 2012 静态分析
+        id: cppcheck
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # 获取 PR 变更的 C 文件列表
+          C_FILES=$(gh pr view $PR_NUMBER --json files --jq '.files[].path' | grep -E '\.(c|cpp|h)$' | tr '\n' ' ')
+          if [ -n "$C_FILES" ]; then
+            cppcheck --enable=warning,style,performance,portability \
+                     --suppress=missingIncludeSystem \
+                     --addon=misra \
+                     --error-exitcode=0 \
+                     --output-file=cppcheck-result.txt \
+                     $C_FILES 2>&1 || true
+            cat cppcheck-result.txt
+          else
+            echo "no_c_files" > cppcheck-result.txt
+          fi
 
       - name: 代码审查
         id: code-review
@@ -41,7 +60,8 @@ jobs:
             const fs = require('fs');
             let cppcheckOutput = '';
             try {
-              cppcheckOutput = fs.readFileSync('cppcheck-result.txt', 'utf8').trim();
+              const raw = fs.readFileSync('cppcheck-result.txt', 'utf8').trim();
+              if (raw !== 'no_c_files') cppcheckOutput = raw;
             } catch(e) {}
             
             const { data: files } = await github.rest.pulls.listFiles({
