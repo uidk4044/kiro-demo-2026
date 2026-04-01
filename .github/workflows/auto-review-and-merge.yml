@@ -173,3 +173,39 @@ jobs:
             } catch (error) {
               console.log(`删除分支失败: ${error.message}`);
             }
+
+  auto-merge:
+    runs-on: ubuntu-latest
+    needs: auto-review
+    if: success()
+    steps:
+      - name: 自动合并
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ github.event.pull_request.number }};
+            const branch = '${{ github.event.pull_request.head.ref }}';
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: '✅ 代码审查通过，自动合并中...'
+            });
+
+            await github.rest.pulls.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              merge_method: 'squash'
+            });
+
+            try {
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/${branch}`
+              });
+            } catch (error) {
+              console.log(`删除分支失败: ${error.message}`);
+            }
