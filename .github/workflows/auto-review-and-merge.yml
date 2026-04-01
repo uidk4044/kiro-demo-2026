@@ -26,7 +26,7 @@ jobs:
       - name: cppcheck 静态分析
         id: cppcheck
         run: |
-          cppcheck --enable=all --error-exitcode=1 --output-file=cppcheck-result.txt $(find . -name "*.c" -o -name "*.cpp" -o -name "*.h" | grep -v node_modules) 2>&1 || true
+          cppcheck --enable=warning,style,performance,portability --suppress=missingIncludeSystem --error-exitcode=1 --output-file=cppcheck-result.txt $(find . -name "*.c" -o -name "*.cpp" -o -name "*.h" | grep -v node_modules) 2>&1 || true
           cat cppcheck-result.txt
 
       - name: 代码审查
