@@ -21,13 +21,26 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
 
       - name: 安装 cppcheck
-        run: sudo apt-get install -y cppcheck
+        run: sudo apt-get install -y cppcheck python3 python3-pip
 
-      - name: cppcheck 静态分析
+      - name: 安装 MISRA 插件
+        run: |
+          wget -q https://raw.githubusercontent.com/danmar/cppcheck/main/addons/misra.py -O /usr/local/bin/misra.py
+          wget -q https://raw.githubusercontent.com/danmar/cppcheck/main/addons/cppcheckdata.py -O /usr/local/bin/cppcheckdata.py
+
+      - name: cppcheck + MISRA C 2012 静态分析
         id: cppcheck
         run: |
-          cppcheck --enable=warning,style,performance,portability --suppress=missingIncludeSystem --error-exitcode=1 --output-file=cppcheck-result.txt $(find . -name "*.c" -o -name "*.cpp" -o -name "*.h" | grep -v node_modules) 2>&1 || true
-          cat cppcheck-result.txt
+          C_FILES=$(find . -name "*.c" -o -name "*.cpp" -o -name "*.h" | grep -v node_modules | tr '\n' ' ')
+          if [ -n "$C_FILES" ]; then
+            cppcheck --enable=warning,style,performance,portability \
+                     --suppress=missingIncludeSystem \
+                     --addon=misra \
+                     --error-exitcode=0 \
+                     --output-file=cppcheck-result.txt \
+                     $C_FILES 2>&1 || true
+          fi
+          cat cppcheck-result.txt 2>/dev/null || true
 
       - name: 代码审查
         id: code-review
