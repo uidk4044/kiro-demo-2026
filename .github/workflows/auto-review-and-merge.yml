@@ -30,8 +30,12 @@ jobs:
 
       - name: cppcheck + MISRA C 2012 静态分析
         id: cppcheck
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          C_FILES=$(find . -name "*.c" -o -name "*.cpp" -o -name "*.h" | grep -v node_modules | tr '\n' ' ')
+          # 获取 PR 变更的 C 文件列表
+          C_FILES=$(gh pr view $PR_NUMBER --json files --jq '.files[].path' | grep -E '\.(c|cpp|h)$' | tr '\n' ' ')
           if [ -n "$C_FILES" ]; then
             cppcheck --enable=warning,style,performance,portability \
                      --suppress=missingIncludeSystem \
@@ -39,8 +43,10 @@ jobs:
                      --error-exitcode=0 \
                      --output-file=cppcheck-result.txt \
                      $C_FILES 2>&1 || true
+            cat cppcheck-result.txt
+          else
+            echo "no_c_files" > cppcheck-result.txt
           fi
-          cat cppcheck-result.txt 2>/dev/null || true
 
       - name: 代码审查
         id: code-review
@@ -54,7 +60,8 @@ jobs:
             const fs = require('fs');
             let cppcheckOutput = '';
             try {
-              cppcheckOutput = fs.readFileSync('cppcheck-result.txt', 'utf8').trim();
+              const raw = fs.readFileSync('cppcheck-result.txt', 'utf8').trim();
+              if (raw !== 'no_c_files') cppcheckOutput = raw;
             } catch(e) {}
             
             const { data: files } = await github.rest.pulls.listFiles({
