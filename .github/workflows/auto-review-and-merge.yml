@@ -20,6 +20,15 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
+      - name: 安装 cppcheck
+        run: sudo apt-get install -y cppcheck
+
+      - name: cppcheck 静态分析
+        id: cppcheck
+        run: |
+          cppcheck --enable=warning,style,performance,portability --suppress=missingIncludeSystem --error-exitcode=1 --output-file=cppcheck-result.txt $(find . -name "*.c" -o -name "*.cpp" -o -name "*.h" | grep -v node_modules) 2>&1 || true
+          cat cppcheck-result.txt
+
       - name: 代码审查
         id: code-review
         uses: actions/github-script@v7
@@ -27,6 +36,13 @@ jobs:
           script: |
             const prNumber = ${{ github.event.pull_request.number }};
             const headSha = '${{ github.event.pull_request.head.sha }}';
+            
+            // 读取 cppcheck 结果
+            const fs = require('fs');
+            let cppcheckOutput = '';
+            try {
+              cppcheckOutput = fs.readFileSync('cppcheck-result.txt', 'utf8').trim();
+            } catch(e) {}
             
             const { data: files } = await github.rest.pulls.listFiles({
               owner: context.repo.owner,
@@ -42,6 +58,9 @@ jobs:
             
             for (const file of files) {
               console.log(`\n检查文件: ${file.filename}`);
+              
+              // 跳过 workflow 文件本身
+              if (file.filename.startsWith('.github/')) continue;
               
               try {
                 const { data: content } = await github.rest.repos.getContent({
@@ -97,57 +116,58 @@ jobs:
             console.log(`\n=== 检查完成 ===`);
             console.log(`发现问题数量: ${issues.length}`);
             
-            if (issues.length > 0) {
-              console.log('问题列表:');
-              issues.forEach(i => console.log(`  - ${i}`));
-              
-              // 创建 Issue
+            if (issues.length > 0 || cppcheckOutput) {
+              const cppcheckSection = cppcheckOutput
+                ? `\n\n### 🔬 cppcheck 分析结果\n\`\`\`\n${cppcheckOutput}\n\`\`\``
+                : '';
+
               const { data: issue } = await github.rest.issues.create({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 title: `⚠️ 代码审查发现问题 - PR #${prNumber}`,
-                body: `## 🔍 代码审查结果\n\n在 PR #${prNumber} 中发现以下问题：\n\n${issues.map(i => `- ${i}`).join('\n')}\n\n请修复这些问题后重新提交。`,
+                body: `## 🔍 代码审查结果\n\n在 PR #${prNumber} 中发现以下问题：\n\n${issues.map(i => `- ${i}`).join('\n')}${cppcheckSection}\n\n请修复这些问题后重新提交。`,
                 labels: ['code-review', 'automated']
               });
-              
+
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: prNumber,
-                body: `## ⚠️ 静态代码检查发现 ${issues.length} 个问题\n\n${issues.map(i => `- ${i}`).join('\n')}\n\n> 已创建 Issue #${issue.number}，请修复以上问题后重新提交。`
+                body: `## ⚠️ 静态代码检查发现 ${issues.length} 个问题\n\n${issues.map(i => `- ${i}`).join('\n')}${cppcheckSection}\n\n> 已创建 Issue #${issue.number}，请修复以上问题后重新提交。`
               });
-              
-              console.log(`已创建 Issue #${issue.number}`);
-              
-              // 重要：抛出错误阻止后续步骤
-              throw new Error(`发现 ${issues.length} 个代码问题，阻止自动合并`);
+
+              throw new Error(`发现代码问题，阻止自动合并`);
             }
             
             console.log('✅ 未发现问题，可以继续');
             return { hasIssues: false };
 
+  auto-merge:
+    runs-on: ubuntu-latest
+    needs: auto-review
+    if: success()
+    steps:
       - name: 自动合并
-        if: success()
         uses: actions/github-script@v7
         with:
           script: |
             const prNumber = ${{ github.event.pull_request.number }};
             const branch = '${{ github.event.pull_request.head.ref }}';
-            
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,
               body: '✅ 代码审查通过，自动合并中...'
             });
-            
+
             await github.rest.pulls.merge({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: prNumber,
               merge_method: 'squash'
             });
-            
+
             try {
               await github.rest.git.deleteRef({
                 owner: context.repo.owner,
