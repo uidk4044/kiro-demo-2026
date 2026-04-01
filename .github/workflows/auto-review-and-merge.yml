@@ -59,6 +59,9 @@ jobs:
             for (const file of files) {
               console.log(`\n检查文件: ${file.filename}`);
               
+              // 跳过 workflow 文件本身
+              if (file.filename.startsWith('.github/')) continue;
+              
               try {
                 const { data: content } = await github.rest.repos.getContent({
                   owner: context.repo.owner,
